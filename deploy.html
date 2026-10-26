@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Deploy ArcStream</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper:#F3F6FA; --surface:#FFFFFF; --ink:#0F1D2E; --muted:#5B6B7F; --line:#D9E1EA;
+      --usdc:#2775CA; --usdc-ink:#FFFFFF; --flow:#138A63; --flow-soft:#E1F3EC;
+      --danger:#B4382F; --danger-soft:#F8E5E3; --warn:#8A5A00; --warn-soft:#FBF1DA;
+      --font:"Instrument Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --paper:#0C1520; --surface:#132131; --ink:#E7EEF6; --muted:#8D9BAD; --line:#22344A;
+        --usdc:#5B9DE8; --usdc-ink:#06111E; --flow:#3CC596; --flow-soft:#133628;
+        --danger:#E5766C; --danger-soft:#3A1C1A; --warn:#F0C66A; --warn-soft:#3A2E12;
+      }
+    }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { background:var(--paper); color:var(--ink); font-family:var(--font); line-height:1.5; }
+    .wrap { max-width:600px; margin:0 auto; padding:40px 20px 80px; }
+    h1 { font-size:1.8rem; letter-spacing:-0.02em; }
+    p.sub { color:var(--muted); margin-top:6px; }
+    .sheet { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:22px; margin-top:24px; }
+    h2 { font-size:1rem; margin-bottom:10px; }
+    .netswitch { display:inline-flex; border:1px solid var(--line); border-radius:999px; padding:3px; }
+    .netswitch button { border:0; background:transparent; color:var(--muted); font:inherit; font-weight:600; font-size:.9rem; padding:6px 16px; border-radius:999px; cursor:pointer; }
+    .netswitch button[aria-pressed="true"] { background:var(--ink); color:var(--paper); }
+    .facts { margin-top:14px; display:grid; grid-template-columns:auto 1fr; gap:4px 16px; font-size:.92rem; }
+    .facts dt { color:var(--muted); }
+    .facts dd { font-variant-numeric:tabular-nums; word-break:break-all; }
+    .btn { width:100%; margin-top:20px; border:0; border-radius:10px; background:var(--usdc); color:var(--usdc-ink); font:inherit; font-weight:700; padding:14px; cursor:pointer; }
+    .btn:disabled { opacity:.45; cursor:not-allowed; }
+    .status { margin-top:16px; border-radius:10px; padding:12px 16px; font-size:.92rem; display:none; word-break:break-all; }
+    .status.show { display:block; }
+    .status.info { background:var(--paper); }
+    .status.ok { background:var(--flow-soft); color:var(--ink); }
+    .status.err { background:var(--danger-soft); color:var(--danger); }
+    .status.warn { background:var(--warn-soft); color:var(--warn); }
+    .status a { color:var(--usdc); font-weight:600; }
+    code { font-family: ui-monospace, Consolas, monospace; font-size:.88em; background:var(--paper); padding:2px 6px; border-radius:5px; }
+    .copy { margin-top:10px; border:1px solid var(--line); background:var(--surface); color:var(--ink); font:inherit; font-size:.88rem; font-weight:600; padding:6px 12px; border-radius:8px; cursor:pointer; }
+    :focus-visible { outline:2px solid var(--usdc); outline-offset:2px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Deploy ArcStream</h1>
+  <p class="sub">Deploys the ArcStream contract from your wallet. Do Testnet first, then Mainnet.</p>
+
+  <div class="sheet">
+    <h2>Network</h2>
+    <div class="netswitch" role="group" aria-label="Network">
+      <button type="button" data-net="arcTestnet" aria-pressed="true">Arc Testnet</button>
+      <button type="button" data-net="arc" aria-pressed="false">Arc Mainnet</button>
+    </div>
+    <dl class="facts">
+      <dt>Chain ID</dt><dd id="fChain">—</dd>
+      <dt>Wallet</dt><dd id="fWallet">not connected</dd>
+      <dt>Wallet network</dt><dd id="fWalletNet">—</dd>
+      <dt>Balance</dt><dd id="fBalance">—</dd>
+      <dt>Compiler</dt><dd>solc 0.8.28, optimizer 200 runs, EVM cancun</dd>
+      <dt>Bytecode hash</dt><dd id="fHash">—</dd>
+    </dl>
+    <button class="btn" id="btnDeploy" type="button">Connect wallet</button>
+    <div class="status" id="status"></div>
+  </div>
+</div>
+
+<script>
+// ArcStream creation bytecode — compiled from contracts/ArcStream.sol
+// solc 0.8.28+commit.7893614a, optimizer enabled (200 runs), evmVersion cancun
+const BYTECODE = "0x608060405260015f5560016004553480156017575f5ffd5b50611033806100255f395ff3fe6080604052600436106100a5575f3560e01c806364d60d911161006257806364d60d9114610161578063875f43841461022b578063894e9a0d1461024a578063c019f4fc14610276578063dbf13122146102a2578063f7afe902146102c1575f5ffd5b80631e99d569146100a95780632019de28146100d05780632e1a7d4d146100ef5780633df7fb8c1461011057806340622bd01461012357806340e58ee514610142575b5f5ffd5b3480156100b4575f5ffd5b506100bd5f5481565b6040519081526020015b60405180910390f35b3480156100db575f5ffd5b506100bd6100ea366004610dea565b6102e0565b3480156100fa575f5ffd5b5061010e610109366004610e14565b61030b565b005b6100bd61011e366004610dea565b610499565b34801561012e575f5ffd5b506100bd61013d366004610e14565b610844565b34801561014d575f5ffd5b5061010e61015c366004610e14565b61088a565b34801561016c575f5ffd5b506101d861017b366004610e14565b600160208190525f9182526040909120805491810154600282015460038301546004840154600585015460068601546007909601546001600160a01b03978816979095169593949293919290919060ff8082169161010090041689565b604080516001600160a01b039a8b1681529990981660208a0152968801959095526060870193909352608086019190915260a085015260c0840152151560e08301521515610100820152610120016100c7565b348015610236575f5ffd5b506100bd610245366004610e14565b610a91565b348015610255575f5ffd5b50610269610264366004610e14565b610ad0565b6040516100c79190610e2b565b348015610281575f5ffd5b50610295610290366004610eb3565b610bf0565b6040516100c79190610ece565b3480156102ad575f5ffd5b506100bd6102bc366004610dea565b610c59565b3480156102cc575f5ffd5b506102956102db366004610eb3565b610c72565b6002602052815f5260405f2081815481106102f9575f80fd5b905f5260205f20015f91509150505481565b6004546001146103365760405162461bcd60e51b815260040161032d90610f10565b60405180910390fd5b60026004555f8181526001602052604090206007810154610100900460ff166103715760405162461bcd60e51b815260040161032d90610f47565b60018101546001600160a01b031633146103cd5760405162461bcd60e51b815260206004820152601860248201527f41726353747265616d3a206e6f7420726563697069656e740000000000000000604482015260640161032d565b5f6103d782610cd9565b90505f81116104285760405162461bcd60e51b815260206004820152601e60248201527f41726353747265616d3a206e6f7468696e6720746f2077697468647261770000604482015260640161032d565b80826006015f82825461043b9190610f89565b9091555050604051818152339084907fcf7d23a3cbe4e8b36ff82fd1b05b1b17373dc7804b4ebbd6e2356716ef2023729060200160405180910390a3600182015461048f906001600160a01b031682610cf8565b5050600160045550565b5f6004546001146104bc5760405162461bcd60e51b815260040161032d90610f10565b60026004553461050e5760405162461bcd60e51b815260206004820152601b60248201527f41726353747265616d3a206465706f7369742072657175697265640000000000604482015260640161032d565b6001600160a01b0383166105645760405162461bcd60e51b815260206004820152601760248201527f41726353747265616d3a207a65726f2061646472657373000000000000000000604482015260640161032d565b336001600160a01b038416036105b55760405162461bcd60e51b815260206004820152601660248201527541726353747265616d3a2073656c662d73747265616d60501b604482015260640161032d565b603c8210156106065760405162461bcd60e51b815260206004820152601960248201527f41726353747265616d3a206d696e203630207365636f6e647300000000000000604482015260640161032d565b813410156106565760405162461bcd60e51b815260206004820152601c60248201527f41726353747265616d3a206465706f73697420746f6f20736d616c6c00000000604482015260640161032d565b5f8054908061066483610f9c565b9091555090505f6106758334610fb4565b90505f6106828483610fd3565b61068c9034610fea565b90505f6106998234610fea565b9050604051806101200160405280336001600160a01b03168152602001876001600160a01b0316815260200182815260200184815260200142815260200186426106e39190610f89565b81525f6020808301829052604080840183905260016060948501819052898452808352818420865181546001600160a01b03199081166001600160a01b0392831617835588860151838501805490921690831617905587840151600280840191909155968801516003808401919091556080890151600484015560a0890151600584015560c0890151600684015560e0890151600790930180546101009a8b015161ffff1990911694151561ff00191694909417931515909902929092179097553380865295845282852080548084018255908652848620018b9055958c16808552958352908320805491820181558352912001869055857f8d3a4d9a98c71920c13665fb97f1a612978391e661f9a17fa5390f60e7424d5c84426108088b82610f89565b6040805193845260208401929092529082015260600160405180910390a48115610836576108363383610cf8565b505060016004555092915050565b5f8181526001602052604081206007810154610100900460ff1661087a5760405162461bcd60e51b815260040161032d90610f47565b61088381610d9c565b9392505050565b6004546001146108ac5760405162461bcd60e51b815260040161032d90610f10565b60026004555f8181526001602052604090206007810154610100900460ff166108e75760405162461bcd60e51b815260040161032d90610f47565b80546001600160a01b031633146109385760405162461bcd60e51b815260206004820152601560248201527420b931a9ba3932b0b69d103737ba1039b2b73232b960591b604482015260640161032d565b600781015460ff161561098d5760405162461bcd60e51b815260206004820152601c60248201527f41726353747265616d3a20616c72656164792063616e63656c6c656400000000604482015260640161032d565b806005015442106109e05760405162461bcd60e51b815260206004820152601760248201527f41726353747265616d3a2073747265616d20656e646564000000000000000000604482015260640161032d565b5f6109ea82610d9c565b90505f8183600201546109fd9190610fea565b90505f836006015483610a109190610fea565b60078501805460ff1916600117905560028501849055426005860155604080518481526020810183905291925086917fe371136c8e803ec26d1f711d0b7c513a1afb0707bbbecf3a20c7ac65cc4896e4910160405180910390a28115610a85578354610a85906001600160a01b031683610cf8565b50506001600455505050565b5f8181526001602052604081206007810154610100900460ff16610ac75760405162461bcd60e51b815260040161032d90610f47565b61088381610cd9565b610b2c6040518061012001604052805f6001600160a01b031681526020015f6001600160a01b031681526020015f81526020015f81526020015f81526020015f81526020015f81526020015f151581526020015f151581525090565b5f82815260016020526040902060070154610100900460ff16610b615760405162461bcd60e51b815260040161032d90610f47565b505f9081526001602081815260409283902083516101208101855281546001600160a01b03908116825293820154909316918301919091526002810154928201929092526003820154606082015260048201546080820152600582015460a0820152600682015460c082015260079091015460ff808216151560e0840152610100918290041615159082015290565b6001600160a01b0381165f90815260026020908152604091829020805483518184028101840190945280845260609392830182828015610c4d57602002820191905f5260205f20905b815481526020019060010190808311610c39575b50505050509050919050565b6003602052815f5260405f2081815481106102f9575f80fd5b6001600160a01b0381165f90815260036020908152604091829020805483518184028101840190945280845260609392830182828015610c4d57602002820191905f5260205f2090815481526020019060010190808311610c395750505050509050919050565b5f8160060154610ce883610d9c565b610cf29190610fea565b92915050565b5f826001600160a01b0316826040515f6040518083038185875af1925050503d805f8114610d41576040519150601f19603f3d011682016040523d82523d5f602084013e610d46565b606091505b5050905080610d975760405162461bcd60e51b815260206004820152601a60248201527f41726353747265616d3a207472616e73666572206661696c6564000000000000604482015260640161032d565b505050565b5f81600501544210610db057506002015490565b5f826004015442610dc19190610fea565b90508260030154816108839190610fd3565b6001600160a01b0381168114610de7575f5ffd5b50565b5f5f60408385031215610dfb575f5ffd5b8235610e0681610dd3565b946020939093013593505050565b5f60208284031215610e24575f5ffd5b5035919050565b5f6101208201905060018060a01b03835116825260018060a01b03602084015116602083015260408301516040830152606083015160608301526080830151608083015260a083015160a083015260c083015160c083015260e0830151610e9660e084018215159052565b50610100830151610eac61010084018215159052565b5092915050565b5f60208284031215610ec3575f5ffd5b813561088381610dd3565b602080825282518282018190525f918401906040840190835b81811015610f05578351835260209384019390920191600101610ee7565b509095945050505050565b60208082526019908201527f41726353747265616d3a207265656e7472616e742063616c6c00000000000000604082015260600190565b602080825260149082015273105c98d4dd1c99585b4e881b9bdd08199bdd5b9960621b604082015260600190565b634e487b7160e01b5f52601160045260245ffd5b80820180821115610cf257610cf2610f75565b5f60018201610fad57610fad610f75565b5060010190565b5f82610fce57634e487b7160e01b5f52601260045260245ffd5b500490565b8082028115828204841417610cf257610cf2610f75565b81810381811115610cf257610cf2610f7556fea264697066735822122023736a6e7a1350b6c70f328cff11b6f15e47d6d4db5999ec3a632f0981aef48564736f6c634300081c0033";
+
+const NETWORKS = {
+  arcTestnet: {
+    key: "arcTestnet", chainId: 5042002, chainName: "Arc Testnet",
+    rpcUrls: ["https://rpc.testnet.arc.io"], explorer: "https://explorer.testnet.arc.io",
+    faucet: "https://faucet.circle.com"
+  },
+  arc: {
+    key: "arc", chainId: 5042, chainName: "Arc",
+    rpcUrls: ["https://rpc.mainnet.arc.io"], explorer: "https://explorer.arc.io"
+  }
+};
+const MIN_FEE = ethers.utils.parseUnits("20", "gwei");
+const PRIORITY_FEE = ethers.utils.parseUnits("1", "gwei");
+
+const eth = window.ethereum || window.okxwallet || null;
+let target = NETWORKS.arcTestnet;
+let provider = null, signer = null, address = null, walletChainId = null;
+const $ = id => document.getElementById(id);
+const hexId = n => "0x" + n.toString(16);
+
+function setStatus(kind, html) { const el = $("status"); el.className = "status show " + kind; el.innerHTML = html; }
+function clearStatus() { $("status").className = "status"; }
+
+function errMsg(e) {
+  if (!e) return "unknown error";
+  if (e.code === 4001 || e.code === "ACTION_REJECTED") return "You rejected the request in your wallet.";
+  const m = e.reason || e.error?.data?.message || e.error?.message || e.data?.message || e.message || "unknown error";
+  return String(m).slice(0, 200);
+}
+
+async function refresh() {
+  document.querySelectorAll("[data-net]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.net === target.key)));
+  $("fChain").textContent = `${target.chainId} (${hexId(target.chainId)})`;
+  $("fHash").textContent = ethers.utils.keccak256(BYTECODE).slice(0, 18) + "…";
+  const btn = $("btnDeploy");
+
+  if (!eth) {
+    btn.disabled = true; btn.textContent = "No wallet found";
+    setStatus("err", "Install MetaMask, Rabby or OKX Wallet, then reload this page.");
+    return;
+  }
+  if (!address) { btn.disabled = false; btn.textContent = "Connect wallet"; return; }
+
+  $("fWallet").textContent = address;
+  walletChainId = (await provider.getNetwork()).chainId;
+  $("fWalletNet").textContent = walletChainId === target.chainId ? `${target.chainName} ✓` : `chain ${walletChainId}`;
+
+  if (walletChainId !== target.chainId) {
+    $("fBalance").textContent = "—";
+    btn.disabled = false; btn.textContent = `Switch wallet to ${target.chainName}`;
+    return;
+  }
+  const bal = await provider.getBalance(address);
+  $("fBalance").textContent = `${ethers.utils.formatEther(bal)} USDC`;
+  if (bal.isZero()) {
+    btn.disabled = true; btn.textContent = "No USDC for gas";
+    setStatus("warn", target.faucet
+      ? `This wallet has no USDC on ${target.chainName}. Get test USDC at <a href="${target.faucet}" target="_blank" rel="noopener">faucet.circle.com</a>, then reload.`
+      : `This wallet has no USDC on ${target.chainName}. Bridge a few USDC to Arc for gas, then reload.`);
+    return;
+  }
+  btn.disabled = false; btn.textContent = `Deploy to ${target.chainName}`;
+}
+
+async function connect() {
+  provider = new ethers.providers.Web3Provider(eth, "any");
+  await provider.send("eth_requestAccounts", []);
+  signer = provider.getSigner();
+  address = await signer.getAddress();
+}
+
+async function switchWallet() {
+  try {
+    await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId: hexId(target.chainId) }] });
+  } catch (e) {
+    const unknown = e && (e.code === 4902 || e.data?.originalError?.code === 4902 || /unrecognized chain|not been added|unknown chain/i.test(e.message || ""));
+    if (!unknown) throw e;
+    await eth.request({ method: "wallet_addEthereumChain", params: [{
+      chainId: hexId(target.chainId), chainName: target.chainName,
+      nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
+      rpcUrls: target.rpcUrls, blockExplorerUrls: [target.explorer]
+    }]});
+  }
+}
+
+async function feeOverrides() {
+  const block = await provider.getBlock("latest");
+  const base = block && block.baseFeePerGas ? block.baseFeePerGas : MIN_FEE;
+  let maxFee = base.mul(2).add(PRIORITY_FEE);
+  const floor = MIN_FEE.add(PRIORITY_FEE);
+  if (maxFee.lt(floor)) maxFee = floor;
+  return { maxFeePerGas: maxFee, maxPriorityFeePerGas: PRIORITY_FEE };
+}
+
+async function onButton() {
+  const btn = $("btnDeploy");
+  clearStatus();
+  try {
+    if (!address) { await connect(); return refresh(); }
+    if (walletChainId !== target.chainId) { await switchWallet(); return; } // chainChanged → reload
+
+    if (target.key === "arc" && !confirm("Deploy ArcStream to Arc Mainnet? This costs real USDC for gas.")) return;
+
+    btn.disabled = true; btn.textContent = "Confirm in your wallet…";
+    const factory = new ethers.ContractFactory([], BYTECODE, signer);
+    const contract = await factory.deploy(await feeOverrides());
+    const txUrl = `${target.explorer}/tx/${contract.deployTransaction.hash}`;
+    btn.textContent = "Deploying…";
+    setStatus("info", `Transaction sent. <a href="${txUrl}" target="_blank" rel="noopener">View transaction</a>`);
+    await contract.deployed();
+
+    const addrUrl = `${target.explorer}/address/${contract.address}`;
+    setStatus("ok", `ArcStream is live on ${target.chainName}.<br><br>
+      Address: <b>${contract.address}</b><br>
+      <a href="${addrUrl}" target="_blank" rel="noopener">Open in explorer</a> · <a href="${txUrl}" target="_blank" rel="noopener">Deploy transaction</a><br><br>
+      Paste this address in <code>index.html</code> as <code>NETWORKS.${target.key}.contract</code>.<br>
+      <button class="copy" type="button" id="btnCopy">Copy address</button>`);
+    $("btnCopy").addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(contract.address); $("btnCopy").textContent = "Copied"; } catch {}
+    });
+    btn.textContent = "Deployed";
+  } catch (e) {
+    console.error(e);
+    setStatus("err", "Deploy failed: " + errMsg(e));
+    btn.disabled = false;
+    await refresh();
+  }
+}
+
+document.querySelectorAll("[data-net]").forEach(b => b.addEventListener("click", () => {
+  target = NETWORKS[b.dataset.net]; clearStatus(); refresh();
+}));
+$("btnDeploy").addEventListener("click", onButton);
+
+if (eth && eth.on) {
+  eth.on("chainChanged", () => location.reload());
+  eth.on("accountsChanged", () => location.reload());
+}
+
+window.addEventListener("DOMContentLoaded", async () => {
+  try {
+    const saved = sessionStorage.getItem("arcstream.deploy.net");
+    if (saved && NETWORKS[saved]) target = NETWORKS[saved];
+  } catch {}
+  document.querySelectorAll("[data-net]").forEach(b => b.addEventListener("click", () => {
+    try { sessionStorage.setItem("arcstream.deploy.net", b.dataset.net); } catch {}
+  }));
+  if (eth) {
+    try {
+      const acc = await eth.request({ method: "eth_accounts" });
+      if (acc.length) {
+        provider = new ethers.providers.Web3Provider(eth, "any");
+        signer = provider.getSigner();
+        address = await signer.getAddress();
+      }
+    } catch {}
+  }
+  refresh();
+});
+</script>
+</body>
+</html>

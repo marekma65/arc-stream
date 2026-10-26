@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Arc Stream — pay in USDC, by the second</title>
+  <meta name="description" content="Stream USDC per second on Arc. Lock a deposit, the recipient withdraws as it flows, cancel anytime." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
+
+  <style>
+    :root {
+      color-scheme: light;
+      --paper:       #F3F6FA;
+      --surface:     #FFFFFF;
+      --ink:         #0F1D2E;
+      --muted:       #5B6B7F;
+      --line:        #D9E1EA;
+      --usdc:        #2775CA;
+      --usdc-ink:    #FFFFFF;
+      --usdc-soft:   #E3EEF9;
+      --flow:        #138A63;
+      --flow-soft:   #E1F3EC;
+      --danger:      #B4382F;
+      --danger-soft: #F8E5E3;
+      --warn-soft:   #FBF1DA;
+      --warn:        #8A5A00;
+      --font: "Instrument Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --paper:       #0C1520;
+        --surface:     #132131;
+        --ink:         #E7EEF6;
+        --muted:       #8D9BAD;
+        --line:        #22344A;
+        --usdc:        #5B9DE8;
+        --usdc-ink:    #06111E;
+        --usdc-soft:   #16304D;
+        --flow:        #3CC596;
+        --flow-soft:   #133628;
+        --danger:      #E5766C;
+        --danger-soft: #3A1C1A;
+        --warn-soft:   #3A2E12;
+        --warn:        #F0C66A;
+      }
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--font);
+      font-size: 16px;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+    .num { font-variant-numeric: tabular-nums; }
+    a { color: var(--usdc); }
+    button { font-family: inherit; cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .45; }
+    :focus-visible { outline: 2px solid var(--usdc); outline-offset: 2px; }
+
+    .wrap { max-width: 760px; margin: 0 auto; padding: 0 20px 80px; }
+
+    /* ── Header ── */
+    header {
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      flex-wrap: wrap;
+      padding: 24px 0;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.15rem; letter-spacing: -0.01em; }
+    .brand svg { width: 30px; height: 30px; }
+    .header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+    .netswitch {
+      display: inline-flex; border: 1px solid var(--line); border-radius: 999px;
+      background: var(--surface); padding: 3px;
+    }
+    .netswitch button {
+      border: 0; background: transparent; color: var(--muted);
+      font-size: .85rem; font-weight: 600; padding: 6px 14px; border-radius: 999px;
+    }
+    .netswitch button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+
+    .btn-wallet {
+      border: 1px solid var(--ink); background: var(--ink); color: var(--paper);
+      font-size: .9rem; font-weight: 600; padding: 8px 16px; border-radius: 999px;
+    }
+    .btn-wallet.connected { background: var(--surface); color: var(--ink); border-color: var(--line); }
+
+    /* ── Hero ── */
+    .hero { padding: 40px 0 36px; }
+    .hero h1 {
+      font-size: clamp(2.2rem, 6vw, 3.4rem);
+      line-height: 1.05; letter-spacing: -0.03em; font-weight: 700;
+      max-width: 14ch;
+    }
+    .hero p.lead { color: var(--muted); font-size: 1.1rem; max-width: 52ch; margin-top: 16px; }
+
+    .ticker {
+      margin-top: 36px;
+      border-left: 4px solid var(--flow);
+      padding: 6px 0 6px 20px;
+    }
+    .ticker-value {
+      font-size: clamp(2.4rem, 8vw, 4.2rem);
+      font-weight: 600; letter-spacing: -0.03em; line-height: 1;
+      color: var(--flow);
+    }
+    .ticker-value small { font-size: .38em; font-weight: 600; letter-spacing: 0; margin-left: 6px; color: var(--muted); }
+    .ticker-note { color: var(--muted); font-size: .92rem; margin-top: 10px; max-width: 56ch; }
+
+    /* ── Notices ── */
+    .notice {
+      border-radius: 10px; padding: 12px 16px; font-size: .92rem; margin-bottom: 16px;
+      display: none;
+    }
+    .notice.show { display: block; }
+    .notice.warn   { background: var(--warn-soft); color: var(--warn); }
+    .notice.danger { background: var(--danger-soft); color: var(--danger); }
+    .notice.info   { background: var(--usdc-soft); color: var(--ink); }
+    .notice button {
+      margin-left: 8px; border: 0; background: transparent; color: inherit;
+      font-weight: 700; text-decoration: underline; font-size: inherit;
+    }
+
+    /* ── Tabs ── */
+    .tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--line); margin-bottom: 24px; }
+    .tab {
+      border: 0; background: transparent; color: var(--muted);
+      font-size: 1rem; font-weight: 600; padding: 10px 0; margin-bottom: -1px;
+      border-bottom: 2px solid transparent;
+    }
+    .tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* ── Form ── */
+    .sheet { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 24px; }
+    .field { margin-bottom: 20px; }
+    .field label { display: block; font-weight: 600; font-size: .92rem; margin-bottom: 6px; }
+    .field .hint { color: var(--muted); font-size: .85rem; margin-top: 6px; }
+    .field input {
+      width: 100%; font: inherit; color: var(--ink);
+      background: var(--paper); border: 1px solid var(--line); border-radius: 8px;
+      padding: 11px 12px;
+    }
+    .field input:focus { outline: 2px solid var(--usdc); outline-offset: 0; border-color: transparent; }
+    .amount-row { display: flex; gap: 8px; align-items: center; }
+    .amount-row input { flex: 1; }
+    .amount-row span { font-weight: 600; color: var(--muted); }
+
+    .presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .preset {
+      border: 1px solid var(--line); background: transparent; color: var(--ink);
+      font-size: .85rem; padding: 5px 12px; border-radius: 999px;
+    }
+    .preset[aria-pressed="true"] { border-color: var(--usdc); background: var(--usdc-soft); }
+
+    .summary {
+      display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px 24px;
+      border-top: 1px solid var(--line); padding-top: 18px; margin: 4px 0 22px;
+    }
+    .summary dt { color: var(--muted); font-size: .85rem; }
+    .summary dd { font-weight: 600; }
+
+    .btn-primary {
+      width: 100%; border: 0; border-radius: 10px;
+      background: var(--usdc); color: var(--usdc-ink);
+      font-size: 1rem; font-weight: 700; padding: 14px;
+    }
+
+    .how { margin-top: 36px; }
+    .how h2 { font-size: 1.1rem; margin-bottom: 12px; }
+    .how dl { display: grid; gap: 12px; }
+    .how dt { font-weight: 600; }
+    .how dd { color: var(--muted); max-width: 60ch; }
+
+    /* ── Streams ── */
+    .subtabs { display: inline-flex; gap: 6px; margin-bottom: 16px; }
+    .subtab {
+      border: 1px solid var(--line); background: var(--surface); color: var(--muted);
+      font-size: .9rem; font-weight: 600; padding: 6px 14px; border-radius: 999px;
+    }
+    .subtab[aria-pressed="true"] { color: var(--ink); border-color: var(--ink); }
+
+    .stream {
+      background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+      padding: 20px; margin-bottom: 12px;
+    }
+    .stream-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+    .stream-id { font-weight: 700; }
+    .status { font-size: .8rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
+    .status.active    { background: var(--flow-soft); color: var(--flow); }
+    .status.completed { background: var(--usdc-soft); color: var(--usdc); }
+    .status.cancelled { background: var(--danger-soft); color: var(--danger); }
+    .parties { color: var(--muted); font-size: .92rem; margin-top: 6px; word-break: break-all; }
+    .parties a { text-decoration: none; }
+    .streamed { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.02em; margin-top: 14px; }
+    .streamed small { font-size: .55em; color: var(--muted); font-weight: 500; }
+    .bar { height: 6px; background: var(--paper); border-radius: 999px; overflow: hidden; margin: 10px 0 14px; }
+    .bar > div { height: 100%; background: var(--flow); border-radius: 999px; }
+    .stream.cancelled .bar > div { background: var(--danger); }
+    .meta { display: flex; flex-wrap: wrap; gap: 6px 22px; color: var(--muted); font-size: .88rem; }
+    .meta b { color: var(--ink); font-weight: 600; }
+    .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+    .btn-flow, .btn-danger {
+      border-radius: 8px; font-size: .92rem; font-weight: 700; padding: 9px 16px; border: 1px solid;
+    }
+    .btn-flow   { background: var(--flow); border-color: var(--flow); color: var(--surface); }
+    .btn-danger { background: transparent; border-color: var(--danger); color: var(--danger); }
+
+    .empty { text-align: left; color: var(--muted); padding: 28px 0; }
+    .empty button {
+      margin-top: 12px; border: 1px solid var(--ink); background: transparent; color: var(--ink);
+      font-weight: 600; padding: 8px 16px; border-radius: 999px;
+    }
+
+    footer { margin-top: 56px; color: var(--muted); font-size: .85rem; border-top: 1px solid var(--line); padding-top: 18px; }
+    footer a { color: var(--muted); }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+      max-width: calc(100% - 32px);
+      background: var(--ink); color: var(--paper);
+      padding: 12px 18px; border-radius: 10px; font-size: .92rem;
+      display: none; z-index: 10;
+    }
+    #toast.show { display: block; }
+    #toast.error { background: var(--danger); color: #fff; }
+    #toast a { color: inherit; font-weight: 700; }
+
+    @media (max-width: 520px) {
+      .summary { grid-template-columns: 1fr; }
+      .sheet { padding: 18px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <circle cx="16" cy="16" r="15" fill="var(--usdc)"/>
+        <path d="M7 19c3-6 6-6 9 0s6 6 9 0" fill="none" stroke="var(--usdc-ink)" stroke-width="2.4" stroke-linecap="round"/>
+        <path d="M7 13c3-6 6-6 9 0s6 6 9 0" fill="none" stroke="var(--usdc-ink)" stroke-width="2.4" stroke-linecap="round" opacity=".55"/>
+      </svg>
+      Arc Stream
+    </div>
+    <div class="header-right">
+      <div class="netswitch" role="group" aria-label="Network" id="netSwitch"></div>
+      <button class="btn-wallet" id="btnWallet" type="button">Connect wallet</button>
+    </div>
+  </header>
+
+  <section class="hero">
+    <h1>Pay in USDC, by the second.</h1>
+    <p class="lead">Lock a USDC deposit for someone. It flows to them every second, they withdraw whenever they like, and you can cancel to get back what hasn't flowed yet.</p>
+
+    <div class="ticker" aria-live="off">
+      <div class="ticker-value num" id="tickerValue">0.000000<small>USDC</small></div>
+      <p class="ticker-note">A 5,000 USDC monthly salary, streamed since you opened this page.</p>
+    </div>
+  </section>
+
+  <div class="notice danger" id="noticeWallet"></div>
+  <div class="notice warn" id="noticeNetwork"></div>
+  <div class="notice info" id="noticeContract"></div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" id="tab-create" aria-selected="true" type="button">New stream</button>
+    <button class="tab" role="tab" id="tab-streams" aria-selected="false" type="button">My streams</button>
+  </div>
+
+  <!-- NEW STREAM -->
+  <section class="panel active" id="panel-create" role="tabpanel" aria-labelledby="tab-create">
+    <div class="sheet">
+      <div class="field">
+        <label for="inRecipient">Recipient address</label>
+        <input id="inRecipient" type="text" placeholder="0x…" autocomplete="off" spellcheck="false" />
+      </div>
+
+      <div class="field">
+        <label for="inAmount">Amount</label>
+        <div class="amount-row">
+          <input id="inAmount" type="number" placeholder="100" min="0" step="0.01" inputmode="decimal" />
+          <span>USDC</span>
+        </div>
+        <p class="hint num" id="balanceHint">Connect a wallet to see your balance.</p>
+      </div>
+
+      <div class="field">
+        <label for="inDuration">Duration in seconds</label>
+        <input id="inDuration" type="number" placeholder="2592000" min="60" step="1" inputmode="numeric" />
+        <div class="presets" id="presets">
+          <button class="preset" type="button" data-secs="3600" aria-pressed="false">1 hour</button>
+          <button class="preset" type="button" data-secs="86400" aria-pressed="false">1 day</button>
+          <button class="preset" type="button" data-secs="604800" aria-pressed="false">7 days</button>
+          <button class="preset" type="button" data-secs="2592000" aria-pressed="false">30 days</button>
+        </div>
+        <p class="hint">Minimum 60 seconds.</p>
+      </div>
+
+      <dl class="summary num">
+        <div><dt>Per second</dt><dd id="prevRate">—</dd></div>
+        <div><dt>Per day</dt><dd id="prevDaily">—</dd></div>
+        <div><dt>Ends</dt><dd id="prevEnd">—</dd></div>
+        <div><dt>You lock</dt><dd id="prevTotal">—</dd></div>
+      </dl>
+
+      <button class="btn-primary" id="btnCreate" type="button" disabled>Start stream</button>
+    </div>
+
+    <div class="how">
+      <h2>How it works</h2>
+      <dl>
+        <div><dt>You lock USDC in the contract</dt><dd>It starts flowing to the recipient the moment the transaction lands.</dd></div>
+        <div><dt>The recipient withdraws anytime</dt><dd>They take whatever has flowed so far, as often as they like.</dd></div>
+        <div><dt>You can cancel before the end</dt><dd>You get the unflowed part back right away. What already flowed stays theirs to withdraw.</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <!-- MY STREAMS -->
+  <section class="panel" id="panel-streams" role="tabpanel" aria-labelledby="tab-streams">
+    <div class="subtabs" role="group" aria-label="Direction">
+      <button class="subtab" type="button" data-dir="outgoing" aria-pressed="true">Sending</button>
+      <button class="subtab" type="button" data-dir="incoming" aria-pressed="false">Receiving</button>
+    </div>
+    <div id="streamsList">
+      <div class="empty">Connect a wallet to see your streams.</div>
+    </div>
+  </section>
+
+  <footer>
+    <span id="footerNet"></span>
+    · Contract: <a id="footerContract" href="#" target="_blank" rel="noopener">not deployed</a>
+    · Gas is paid in USDC.
+  </footer>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+// ──────────────────────────────────────────────────────────
+//  CONFIG — paste contract addresses after deploying with deploy.html
+// ──────────────────────────────────────────────────────────
+const NETWORKS = {
+  arc: {
+    key: "arc",
+    label: "Mainnet",
+    chainId: 5042,
+    chainName: "Arc",
+    rpcUrls: [
+      "https://rpc.mainnet.arc.io",
+      "https://rpc.drpc.mainnet.arc.io",
+      "https://rpc.blockdaemon.mainnet.arc.io",
+      "https://rpc.quicknode.mainnet.arc.io"
+    ],
+    explorer: "https://explorer.arc.io",
+    contract: "" // ← Arc Mainnet ArcStream address
+  },
+  arcTestnet: {
+    key: "arcTestnet",
+    label: "Testnet",
+    chainId: 5042002,
+    chainName: "Arc Testnet",
+    rpcUrls: [
+      "https://rpc.testnet.arc.io",
+      "https://rpc.drpc.testnet.arc.io",
+      "https://rpc.blockdaemon.testnet.arc.io",
+      "https://rpc.quicknode.testnet.arc.io"
+    ],
+    explorer: "https://explorer.testnet.arc.io",
+    faucet: "https://faucet.circle.com",
+    contract: "" // ← Arc Testnet ArcStream address
+  }
+};
+const NETWORK_ORDER = ["arcTestnet", "arc"];
+
+const ABI = [
+  "function createStream(address recipient, uint256 duration) payable returns (uint256)",
+  "function withdraw(uint256 streamId)",
+  "function cancel(uint256 streamId)",
+  "function getWithdrawableAmount(uint256 streamId) view returns (uint256)",
+  "function getSenderStreams(address) view returns (uint256[])",
+  "function getRecipientStreams(address) view returns (uint256[])",
+  "function getStream(uint256 streamId) view returns (tuple(address sender,address recipient,uint256 deposit,uint256 ratePerSecond,uint256 startTime,uint256 endTime,uint256 withdrawn,bool cancelled,bool exists))",
+  "function nextStreamId() view returns (uint256)"
+];
+
+// Arc mempool silently drops transactions with maxFeePerGas below 20 gwei
+const MIN_FEE = ethers.utils.parseUnits("20", "gwei");
+const PRIORITY_FEE = ethers.utils.parseUnits("1", "gwei");
+
+// ──────────────────────────────────────────────────────────
+//  STATE
+// ──────────────────────────────────────────────────────────
+const eth = window.ethereum || window.okxwallet || null;
+let provider = null, signer = null, contract = null, userAddress = null;
+let walletChainId = null;
+let net = null;              // active network config
+let direction = "outgoing";
+let streams = [];
+let liveTimer = null;
+
+const $ = id => document.getElementById(id);
+const hexId = n => "0x" + n.toString(16);
+const short = a => a.slice(0, 6) + "…" + a.slice(-4);
+const netByChainId = id => Object.values(NETWORKS).find(n => n.chainId === id) || null;
+
+function fmtUSDC(n, maxDigits = 6) {
+  return Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: maxDigits });
+}
+function bnToFloat(bn) { return parseFloat(ethers.utils.formatEther(bn)); }
+
+function defaultNetwork() {
+  try {
+    const saved = localStorage.getItem("arcstream.net");
+    if (saved && NETWORKS[saved]) return NETWORKS[saved];
+  } catch {}
+  return NETWORKS.arc.contract ? NETWORKS.arc : NETWORKS.arcTestnet;
+}
+function rememberNetwork(key) { try { localStorage.setItem("arcstream.net", key); } catch {} }
+
+// ──────────────────────────────────────────────────────────
+//  HERO TICKER
+// ──────────────────────────────────────────────────────────
+(function ticker() {
+  const perSecond = 5000 / (30 * 86400);
+  const t0 = performance.now();
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const el = $("tickerValue");
+  const draw = () => {
+    const v = ((performance.now() - t0) / 1000) * perSecond;
+    el.innerHTML = v.toFixed(6) + "<small>USDC</small>";
+  };
+  setInterval(draw, reduce ? 1000 : 100);
+})();
+
+// ──────────────────────────────────────────────────────────
+//  NETWORK UI
+// ──────────────────────────────────────────────────────────
+function renderNetSwitch() {
+  const box = $("netSwitch");
+  box.innerHTML = "";
+  NETWORK_ORDER.forEach(key => {
+    const n = NETWORKS[key];
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = n.label;
+    b.setAttribute("aria-pressed", net && net.key === key ? "true" : "false");
+    b.addEventListener("click", () => chooseNetwork(key));
+    box.appendChild(b);
+  });
+  $("footerNet").textContent = net ? `${net.chainName} (chain ${net.chainId})` : "";
+  const fc = $("footerContract");
+  if (net && net.contract) {
+    fc.textContent = short(net.contract);
+    fc.href = `${net.explorer}/address/${net.contract}`;
+  } else {
+    fc.textContent = "not deployed";
+    fc.removeAttribute("href");
+  }
+}
+
+async function chooseNetwork(key) {
+  rememberNetwork(key);
+  if (!userAddress) {
+    net = NETWORKS[key];
+    renderNetSwitch();
+    updateNotices();
+    return;
+  }
+  await switchWalletTo(NETWORKS[key]);
+}
+
+async function switchWalletTo(target) {
+  try {
+    await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId: hexId(target.chainId) }] });
+  } catch (e) {
+    const unknownChain = e && (e.code === 4902 || e.data?.originalError?.code === 4902 ||
+      /unrecognized chain|not been added|unknown chain/i.test(e.message || ""));
+    if (!unknownChain) {
+      if (e && e.code !== 4001) toast("error", "Couldn't switch network. Switch to " + target.chainName + " in your wallet.");
+      return;
+    }
+    try {
+      await eth.request({
+        method: "wallet_addEthereumChain",
+        params: [{
+          chainId: hexId(target.chainId),
+          chainName: target.chainName,
+          nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
+          rpcUrls: target.rpcUrls,
+          blockExplorerUrls: [target.explorer]
+        }]
+      });
+    } catch (e2) {
+      if (e2 && e2.code !== 4001) toast("error", "Couldn't add " + target.chainName + " to your wallet.");
+      return;
+    }
+  }
+  // chainChanged listener reloads the page
+}
+
+function updateNotices() {
+  const nw = $("noticeWallet"), nn = $("noticeNetwork"), nc = $("noticeContract");
+  nw.classList.remove("show"); nn.classList.remove("show"); nc.classList.remove("show");
+
+  if (!eth) {
+    nw.textContent = "No wallet found. Install MetaMask, Rabby or OKX Wallet, then reload this page.";
+    nw.classList.add("show");
+  }
+
+  if (userAddress && walletChainId !== null && !netByChainId(walletChainId)) {
+    nn.innerHTML = "";
+    nn.append(`Your wallet is on chain ${walletChainId}. Arc Stream runs on Arc.`);
+    NETWORK_ORDER.forEach(key => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = "Switch to " + NETWORKS[key].chainName;
+      b.addEventListener("click", () => switchWalletTo(NETWORKS[key]));
+      nn.append(b);
+    });
+    nn.classList.add("show");
+  }
+
+  if (net && !net.contract) {
+    nc.textContent = `Arc Stream isn't deployed on ${net.chainName} yet.`;
+    nc.classList.add("show");
+  } else if (net && net.faucet && userAddress && netByChainId(walletChainId)) {
+    nc.innerHTML = `You're on testnet. Get free test USDC at <a href="${net.faucet}" target="_blank" rel="noopener">faucet.circle.com</a>.`;
+    nc.classList.add("show");
+  }
+  refreshCreateButton();
+}
+
+// ──────────────────────────────────────────────────────────
+//  WALLET
+// ──────────────────────────────────────────────────────────
+async function connectWallet(silent = false) {
+  if (!eth) { updateNotices(); return; }
+  try {
+    provider = new ethers.providers.Web3Provider(eth, "any");
+    if (silent) {
+      const accounts = await eth.request({ method: "eth_accounts" });
+      if (!accounts.length) return;
+    } else {
+      await provider.send("eth_requestAccounts", []);
+    }
+    signer = provider.getSigner();
+    userAddress = await signer.getAddress();
+    walletChainId = (await provider.getNetwork()).chainId;
+
+    const walletNet = netByChainId(walletChainId);
+    if (walletNet) { net = walletNet; rememberNetwork(net.key); }
+
+    const btn = $("btnWallet");
+    btn.textContent = short(userAddress);
+    btn.classList.add("connected");
+
+    renderNetSwitch();
+    updateNotices();
+
+    if (walletNet && walletNet.contract) {
+      contract = new ethers.Contract(walletNet.contract, ABI, signer);
+      await Promise.all([refreshBalance(), loadStreams()]);
+      startLive();
+    } else if (walletNet) {
+      await refreshBalance();
+      $("streamsList").innerHTML = `<div class="empty">Arc Stream isn't deployed on ${walletNet.chainName} yet.</div>`;
+    } else {
+      $("streamsList").innerHTML = `<div class="empty">Switch your wallet to Arc to see your streams.</div>`;
+    }
+  } catch (e) {
+    console.error(e);
+    if (!silent && e && e.code !== 4001) toast("error", "Couldn't connect: " + errMsg(e));
+  }
+}
+
+if (eth && eth.on) {
+  eth.on("accountsChanged", () => location.reload());
+  eth.on("chainChanged", () => location.reload());
+}
+
+async function refreshBalance() {
+  if (!provider || !userAddress || !netByChainId(walletChainId)) return;
+  try {
+    const bal = await provider.getBalance(userAddress);
+    $("balanceHint").textContent = `Balance: ${fmtUSDC(bnToFloat(bal))} USDC. Keep a little for gas.`;
+  } catch {}
+}
+
+// Explicit EIP-1559 fees with Arc's 20 gwei floor
+async function feeOverrides() {
+  try {
+    const block = await provider.getBlock("latest");
+    const base = block && block.baseFeePerGas ? block.baseFeePerGas : MIN_FEE;
+    let maxFee = base.mul(2).add(PRIORITY_FEE);
+    const floor = MIN_FEE.add(PRIORITY_FEE);
+    if (maxFee.lt(floor)) maxFee = floor;
+    return { maxFeePerGas: maxFee, maxPriorityFeePerGas: PRIORITY_FEE };
+  } catch {
+    return {};
+  }
+}
+
+function errMsg(e) {
+  if (!e) return "unknown error";
+  if (e.code === 4001 || e.code === "ACTION_REJECTED") return "you rejected the request in your wallet.";
+  const m = e.reason || e.error?.data?.message || e.error?.message || e.data?.message || e.message || "unknown error";
+  return String(m).replace(/^execution reverted:\s*/i, "").slice(0, 140);
+}
+
+// ──────────────────────────────────────────────────────────
+//  CREATE
+// ──────────────────────────────────────────────────────────
+function readForm() {
+  const recipient = $("inRecipient").value.trim();
+  const amountStr = $("inAmount").value.trim();
+  const duration = parseInt($("inDuration").value, 10);
+  let value = null;
+  try { if (amountStr && Number(amountStr) > 0) value = ethers.utils.parseEther(amountStr); } catch { value = null; }
+  return { recipient, amountStr, duration, value };
+}
+
+function updatePreview() {
+  const { amountStr, duration } = readForm();
+  const amount = Number(amountStr) || 0;
+  if (amount > 0 && duration >= 60) {
+    const perSec = amount / duration;
+    $("prevRate").textContent = perSec.toFixed(8) + " USDC";
+    $("prevDaily").textContent = fmtUSDC(perSec * 86400, 4) + " USDC";
+    $("prevEnd").textContent = new Date(Date.now() + duration * 1000)
+      .toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    $("prevTotal").textContent = fmtUSDC(amount) + " USDC";
+  } else {
+    ["prevRate", "prevDaily", "prevEnd", "prevTotal"].forEach(id => $(id).textContent = "—");
+  }
+  document.querySelectorAll(".preset").forEach(p =>
+    p.setAttribute("aria-pressed", String(parseInt(p.dataset.secs, 10) === duration)));
+  refreshCreateButton();
+}
+
+function refreshCreateButton() {
+  const { recipient, value, duration } = readForm();
+  const ok = !!contract && !!userAddress && !!value && duration >= 60 && ethers.utils.isAddress(recipient);
+  $("btnCreate").disabled = !ok;
+}
+
+async function createStream() {
+  const { recipient, value, duration } = readForm();
+  if (!contract) return;
+  if (!ethers.utils.isAddress(recipient)) return toast("error", "Enter a valid recipient address.");
+  if (recipient.toLowerCase() === userAddress.toLowerCase()) return toast("error", "You can't stream to your own address.");
+  if (!value) return toast("error", "Enter an amount greater than 0.");
+  if (!(duration >= 60)) return toast("error", "Duration must be at least 60 seconds.");
+  if (value.lt(duration)) return toast("error", "Amount is too small for this duration.");
+
+  const bal = await provider.getBalance(userAddress);
+  if (bal.lte(value)) return toast("error", `Not enough USDC. You have ${fmtUSDC(bnToFloat(bal))} USDC and need a bit extra for gas.`);
+
+  const btn = $("btnCreate");
+  btn.disabled = true; btn.textContent = "Confirm in your wallet…";
+  try {
+    const tx = await contract.createStream(recipient, duration, { value, ...(await feeOverrides()) });
+    btn.textContent = "Starting stream…";
+    await tx.wait();
+    toast("ok", "Stream started.", tx.hash);
+    $("inRecipient").value = ""; $("inAmount").value = ""; $("inDuration").value = "";
+    updatePreview();
+    await refreshBalance();
+    direction = "outgoing";
+    selectTab("streams");
+  } catch (e) {
+    console.error(e);
+    toast("error", "Stream not started: " + errMsg(e));
+  } finally {
+    btn.textContent = "Start stream";
+    refreshCreateButton();
+  }
+}
+
+// ──────────────────────────────────────────────────────────
+//  STREAMS
+// ──────────────────────────────────────────────────────────
+async function loadStreams() {
+  if (!contract) return;
+  const el = $("streamsList");
+  el.innerHTML = '<div class="empty">Loading streams…</div>';
+  try {
+    const ids = direction === "outgoing"
+      ? await contract.getSenderStreams(userAddress)
+      : await contract.getRecipientStreams(userAddress);
+    const list = await Promise.all([...ids].reverse().map(async id => {
+      const s = await contract.getStream(id);
+      return {
+        id: id.toNumber(),
+        sender: s.sender,
+        recipient: s.recipient,
+        deposit: bnToFloat(s.deposit),
+        rate: bnToFloat(s.ratePerSecond),
+        start: s.startTime.toNumber(),
+        end: s.endTime.toNumber(),
+        withdrawn: bnToFloat(s.withdrawn),
+        cancelled: s.cancelled
+      };
+    }));
+    streams = list;
+    renderStreams();
+  } catch (e) {
+    console.error(e);
+    el.innerHTML = `<div class="empty">Couldn't load streams: ${errMsg(e)}</div>`;
+  }
+}
+
+function streamedNow(s, now) {
+  if (now >= s.end) return s.deposit;
+  return Math.min(Math.max(0, now - s.start) * s.rate, s.deposit);
+}
+
+function renderStreams() {
+  const el = $("streamsList");
+  if (!streams.length) {
+    el.innerHTML = direction === "outgoing"
+      ? '<div class="empty">You haven\'t started any streams.<br><button type="button" id="emptyCreate">Start a stream</button></div>'
+      : '<div class="empty">Nobody is streaming to this address yet.</div>';
+    const b = $("emptyCreate");
+    if (b) b.addEventListener("click", () => selectTab("create"));
+    return;
+  }
+  const now = Math.floor(Date.now() / 1000);
+  el.innerHTML = streams.map(s => streamCard(s, now)).join("");
+  el.querySelectorAll("[data-withdraw]").forEach(b => b.addEventListener("click", () => withdraw(+b.dataset.withdraw)));
+  el.querySelectorAll("[data-cancel]").forEach(b => b.addEventListener("click", () => cancelStream(+b.dataset.cancel)));
+}
+
+function streamCard(s, now) {
+  const status = s.cancelled ? "cancelled" : (now >= s.end ? "completed" : "active");
+  const streamed = streamedNow(s, now);
+  const withdrawable = Math.max(0, streamed - s.withdrawn);
+  const pct = s.end > s.start ? Math.min(100, ((Math.min(now, s.end) - s.start) / (s.end - s.start)) * 100) : 100;
+  const endText = new Date(s.end * 1000).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const link = a => `<a href="${net.explorer}/address/${a}" target="_blank" rel="noopener">${short(a)}</a>`;
+  const incoming = direction === "incoming";
+  const canWithdraw = incoming && withdrawable > 0.0000001;
+  const canCancel = !incoming && status === "active";
+
+  const statusLabel = { active: "Flowing", completed: "Finished", cancelled: "Cancelled" }[status];
+  const totalLine = status === "cancelled"
+    ? `<span>Flowed before cancel: <b>${fmtUSDC(s.deposit)} USDC</b></span>`
+    : `<span>Total: <b>${fmtUSDC(s.deposit)} USDC</b></span>`;
+
+  return `
+  <article class="stream ${status}" data-id="${s.id}">
+    <div class="stream-top">
+      <span class="stream-id">Stream #${s.id}</span>
+      <span class="status ${status}">${statusLabel}</span>
+    </div>
+    <div class="parties">From ${link(s.sender)} to ${link(s.recipient)}</div>
+    <div class="streamed num"><span data-live="streamed">${streamed.toFixed(6)}</span> <small>USDC flowed</small></div>
+    <div class="bar"><div data-live="bar" style="width:${pct}%"></div></div>
+    <div class="meta num">
+      ${totalLine}
+      <span>Per day: <b>${fmtUSDC(s.rate * 86400, 4)} USDC</b></span>
+      <span>Withdrawn: <b>${fmtUSDC(s.withdrawn)} USDC</b></span>
+      <span>${status === "cancelled" ? "Cancelled" : "Ends"}: <b>${endText}</b></span>
+      ${status === "active" ? `<span>Time left: <b data-live="left">${fmtDuration(s.end - now)}</b></span>` : ""}
+    </div>
+    ${(canWithdraw || canCancel) ? `
+    <div class="actions">
+      ${canWithdraw ? `<button class="btn-flow num" type="button" data-withdraw="${s.id}">Withdraw <span data-live="withdrawable">${withdrawable.toFixed(6)}</span> USDC</button>` : ""}
+      ${canCancel ? `<button class="btn-danger" type="button" data-cancel="${s.id}">Cancel stream</button>` : ""}
+    </div>` : ""}
+  </article>`;
+}
+
+function startLive() {
+  if (liveTimer) clearInterval(liveTimer);
+  liveTimer = setInterval(() => {
+    const now = Math.floor(Date.now() / 1000);
+    streams.forEach(s => {
+      if (s.cancelled) return;
+      const card = document.querySelector(`.stream[data-id="${s.id}"]`);
+      if (!card) return;
+      if (now >= s.end && card.classList.contains("active")) { renderStreams(); return; }
+      const streamed = streamedNow(s, now);
+      const pct = Math.min(100, ((Math.min(now, s.end) - s.start) / (s.end - s.start)) * 100);
+      const q = sel => card.querySelector(`[data-live="${sel}"]`);
+      if (q("streamed")) q("streamed").textContent = streamed.toFixed(6);
+      if (q("bar")) q("bar").style.width = pct + "%";
+      if (q("left")) q("left").textContent = fmtDuration(s.end - now);
+      if (q("withdrawable")) q("withdrawable").textContent = Math.max(0, streamed - s.withdrawn).toFixed(6);
+    });
+  }, 1000);
+}
+
+async function withdraw(id) {
+  const btn = document.querySelector(`[data-withdraw="${id}"]`);
+  if (btn) { btn.disabled = true; btn.textContent = "Confirm in your wallet…"; }
+  try {
+    const tx = await contract.withdraw(id, await feeOverrides());
+    if (btn) btn.textContent = "Withdrawing…";
+    await tx.wait();
+    toast("ok", "Withdrawn.", tx.hash);
+    await Promise.all([loadStreams(), refreshBalance()]);
+  } catch (e) {
+    console.error(e);
+    toast("error", "Not withdrawn: " + errMsg(e));
+    await loadStreams();
+  }
+}
+
+async function cancelStream(id) {
+  if (!confirm("Cancel this stream? You get back what hasn't flowed yet. What already flowed stays with the recipient.")) return;
+  const btn = document.querySelector(`[data-cancel="${id}"]`);
+  if (btn) { btn.disabled = true; btn.textContent = "Confirm in your wallet…"; }
+  try {
+    const tx = await contract.cancel(id, await feeOverrides());
+    if (btn) btn.textContent = "Cancelling…";
+    await tx.wait();
+    toast("ok", "Stream cancelled. Your refund is in your wallet.", tx.hash);
+    await Promise.all([loadStreams(), refreshBalance()]);
+  } catch (e) {
+    console.error(e);
+    toast("error", "Not cancelled: " + errMsg(e));
+    await loadStreams();
+  }
+}
+
+// ──────────────────────────────────────────────────────────
+//  UI HELPERS
+// ──────────────────────────────────────────────────────────
+function selectTab(name) {
+  ["create", "streams"].forEach(n => {
+    $("tab-" + n).setAttribute("aria-selected", String(n === name));
+    $("panel-" + n).classList.toggle("active", n === name);
+  });
+  if (name === "streams") {
+    document.querySelectorAll(".subtab").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.dir === direction)));
+    if (contract) loadStreams();
+  }
+}
+
+function fmtDuration(secs) {
+  if (secs <= 0) return "0s";
+  const d = Math.floor(secs / 86400), h = Math.floor((secs % 86400) / 3600),
+        m = Math.floor((secs % 3600) / 60), s = secs % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+let toastTimer = null;
+function toast(type, msg, txHash) {
+  const el = $("toast");
+  el.textContent = msg;
+  if (txHash && net) {
+    el.append(" ");
+    const a = document.createElement("a");
+    a.href = `${net.explorer}/tx/${txHash}`; a.target = "_blank"; a.rel = "noopener";
+    a.textContent = "View transaction";
+    el.append(a);
+  }
+  el.className = "show " + (type === "error" ? "error" : "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.className = "", type === "error" ? 7000 : 5000);
+}
+
+// ──────────────────────────────────────────────────────────
+//  INIT
+// ──────────────────────────────────────────────────────────
+window.addEventListener("DOMContentLoaded", async () => {
+  net = defaultNetwork();
+  renderNetSwitch();
+  updateNotices();
+
+  $("btnWallet").addEventListener("click", () => { if (!userAddress) connectWallet(false); });
+  $("btnCreate").addEventListener("click", createStream);
+  $("tab-create").addEventListener("click", () => selectTab("create"));
+  $("tab-streams").addEventListener("click", () => selectTab("streams"));
+  ["inRecipient", "inAmount", "inDuration"].forEach(id => $(id).addEventListener("input", updatePreview));
+  document.querySelectorAll(".preset").forEach(p => p.addEventListener("click", () => {
+    $("inDuration").value = p.dataset.secs; updatePreview();
+  }));
+  document.querySelectorAll(".subtab").forEach(b => b.addEventListener("click", () => {
+    direction = b.dataset.dir;
+    document.querySelectorAll(".subtab").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    if (contract) loadStreams();
+  }));
+
+  await connectWallet(true);
+});
+</script>
+</body>
+</html>
