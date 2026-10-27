@@ -5,6 +5,8 @@ Lock a USDC deposit, it flows to the recipient every second, they withdraw anyti
 
 **Live app:** https://arc-stream-xi.vercel.app
 
+**User guide:** [docs/USER-GUIDE.md](docs/USER-GUIDE.md)
+
 Built by wija_ ([@wija_tools](https://x.com/wija_tools)). Based on [OPN Stream](https://github.com/marekma65/opn-stream) (IOPn Builders Season 1), adapted for Arc.
 
 ## Contracts
@@ -38,6 +40,7 @@ Gas is paid in USDC (native, 18 decimals).
 - `test/ArcStream.t.sol` — Foundry tests (`forge test`)
 - `index.html` — the app (ethers.js v5, no build step)
 - `deploy.html` — deploy the contract from your wallet
+- `docs/USER-GUIDE.md` — step-by-step guide for users
 - `verify/ArcStream-standard-input.json` — exact compiler input used for the deployed bytecode (for source verification)
 
 ## Compiler settings
