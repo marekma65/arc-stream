@@ -3,6 +3,7 @@
 Arc Stream lets you pay someone in USDC **by the second**. You lock a USDC amount in a smart contract on Arc, and it flows to the recipient every second for the time you choose. The recipient can withdraw whatever has flowed at any moment, and you can cancel before the end to get back what hasn't flowed yet.
 
 **App:** https://arc-stream-xi.vercel.app
+
 **Source code:** https://github.com/marekma65/arc-stream
 
 No account, no sign-up. You only need a crypto wallet.
