@@ -613,11 +613,40 @@ async function feeOverrides() {
   }
 }
 
+// Gas used per action, measured on the deployed bytecode, with a safety margin
+const GAS_BUDGET = { create: 350000, withdraw: 100000, cancel: 100000 };
+
+// Checks that the wallet can pay `value` plus the network fee for `action`.
+// Returns null when it can, or a ready-to-show message when it can't.
+async function gasProblem(action, overrides, value) {
+  try {
+    const bal = await provider.getBalance(userAddress);
+    const perGas = overrides.maxFeePerGas || MIN_FEE.add(PRIORITY_FEE);
+    const fee = perGas.mul(GAS_BUDGET[action]);
+    const need = fee.add(value || 0);
+    if (bal.gte(need)) return null;
+    const chain = net ? net.chainName : "Arc";
+    if (value && bal.gte(value)) {
+      return `Not enough USDC for the network fee. You have ${fmtUSDC(bnToFloat(bal))} USDC; keep about ${fmtUSDC(bnToFloat(fee), 4)} USDC extra for the fee on ${chain}.`;
+    }
+    if (value) {
+      return `Not enough USDC. You have ${fmtUSDC(bnToFloat(bal))} USDC and need ${fmtUSDC(bnToFloat(need), 4)} USDC including the network fee on ${chain}.`;
+    }
+    return `This wallet has ${fmtUSDC(bnToFloat(bal))} USDC on ${chain}. On Arc the network fee is paid in USDC, so add at least ${fmtUSDC(bnToFloat(fee), 4)} USDC to this wallet first (a few cents is plenty).`;
+  } catch {
+    return null; // if the check itself fails, let the wallet decide
+  }
+}
+
 function errMsg(e) {
   if (!e) return "unknown error";
   if (e.code === 4001 || e.code === "ACTION_REJECTED") return "you rejected the request in your wallet.";
   const m = e.reason || e.error?.data?.message || e.error?.message || e.data?.message || e.message || "unknown error";
-  return String(m).replace(/^execution reverted:\s*/i, "").slice(0, 140);
+  if (/insufficient funds/i.test(m)) return "not enough USDC in this wallet for the network fee.";
+  if (e.code === "UNPREDICTABLE_GAS_LIMIT" && /cannot estimate gas/i.test(m)) {
+    return "the network rejected this transaction in advance. Check that this wallet has some USDC for the fee and that the stream still has something to withdraw.";
+  }
+  return String(m).replace(/^execution reverted:\s*/i, "").slice(0, 160);
 }
 
 // ──────────────────────────────────────────────────────────
@@ -665,13 +694,14 @@ async function createStream() {
   if (!(duration >= 60)) return toast("error", "Duration must be at least 60 seconds.");
   if (value.lt(duration)) return toast("error", "Amount is too small for this duration.");
 
-  const bal = await provider.getBalance(userAddress);
-  if (bal.lte(value)) return toast("error", `Not enough USDC. You have ${fmtUSDC(bnToFloat(bal))} USDC and need a bit extra for gas.`);
+  const fees = await feeOverrides();
+  const problem = await gasProblem("create", fees, value);
+  if (problem) return toast("error", problem);
 
   const btn = $("btnCreate");
   btn.disabled = true; btn.textContent = "Confirm in your wallet…";
   try {
-    const tx = await contract.createStream(recipient, duration, { value, ...(await feeOverrides()) });
+    const tx = await contract.createStream(recipient, duration, { value, ...fees });
     btn.textContent = "Starting stream…";
     await tx.wait();
     toast("ok", "Stream started.", tx.hash);
@@ -804,10 +834,13 @@ function startLive() {
 }
 
 async function withdraw(id) {
+  const fees = await feeOverrides();
+  const problem = await gasProblem("withdraw", fees);
+  if (problem) return toast("error", problem);
   const btn = document.querySelector(`[data-withdraw="${id}"]`);
   if (btn) { btn.disabled = true; btn.textContent = "Confirm in your wallet…"; }
   try {
-    const tx = await contract.withdraw(id, await feeOverrides());
+    const tx = await contract.withdraw(id, fees);
     if (btn) btn.textContent = "Withdrawing…";
     await tx.wait();
     toast("ok", "Withdrawn.", tx.hash);
@@ -821,10 +854,13 @@ async function withdraw(id) {
 
 async function cancelStream(id) {
   if (!confirm("Cancel this stream? You get back what hasn't flowed yet. What already flowed stays with the recipient.")) return;
+  const fees = await feeOverrides();
+  const problem = await gasProblem("cancel", fees);
+  if (problem) return toast("error", problem);
   const btn = document.querySelector(`[data-cancel="${id}"]`);
   if (btn) { btn.disabled = true; btn.textContent = "Confirm in your wallet…"; }
   try {
-    const tx = await contract.cancel(id, await feeOverrides());
+    const tx = await contract.cancel(id, fees);
     if (btn) btn.textContent = "Cancelling…";
     await tx.wait();
     toast("ok", "Stream cancelled. Your refund is in your wallet.", tx.hash);
